@@ -105,3 +105,125 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/clienthub:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/clienthub:${{ github.sha }}
+
+
+  deploy:
+    name: Deploy to Azure VM
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Deploy on Azure VM
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          MYSQL_ROOT_PASSWORD: ${{ secrets.AZURE_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.AZURE_DB_NAME }}
+          MYSQL_USER: ${{ secrets.AZURE_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.AZURE_DB_PASSWORD }}
+
+        with:
+          host: ${{ secrets.AZURE_HOST }}
+          username: ${{ secrets.AZURE_USER }}
+          password: ${{ secrets.AZURE_PASSWORD }}
+          port: 22
+
+          envs: DOCKERHUB_USERNAME,MYSQL_ROOT_PASSWORD,MYSQL_DATABASE,MYSQL_USER,MYSQL_PASSWORD
+
+          script: |
+            set -e
+
+            echo "Création du dossier de déploiement..."
+            mkdir -p ~/clienthub
+            cd ~/clienthub
+
+            echo "Création du fichier .env..."
+            cat > .env <<EOF
+            DOCKERHUB_USERNAME=$DOCKERHUB_USERNAME
+            MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+            MYSQL_DATABASE=$MYSQL_DATABASE
+            MYSQL_USER=$MYSQL_USER
+            MYSQL_PASSWORD=$MYSQL_PASSWORD
+            EOF
+
+            chmod 600 .env
+
+            echo "Création du fichier init.sql..."
+            cat > init.sql <<'EOF'
+            CREATE TABLE IF NOT EXISTS clients (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(100) NOT NULL
+            );
+
+            INSERT INTO clients (name)
+            VALUES
+                ('Alice Martin'),
+                ('Thomas Bernard'),
+                ('Sophie Dubois');
+            EOF
+
+            echo "Création du docker-compose.yml..."
+            cat > docker-compose.yml <<'EOF'
+            services:
+
+              db:
+                image: mysql:8.4
+                container_name: clienthub-db
+                environment:
+                  MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+                  MYSQL_DATABASE: ${MYSQL_DATABASE}
+                  MYSQL_USER: ${MYSQL_USER}
+                  MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+                volumes:
+                  - clienthub-mysql-data:/var/lib/mysql
+                  - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+                networks:
+                  - clienthub-network
+
+              api:
+                image: ${DOCKERHUB_USERNAME}/clienthub:latest
+                container_name: clienthub-api
+                environment:
+                  DB_HOST: db
+                  DB_PORT: 3306
+                  DB_NAME: ${MYSQL_DATABASE}
+                  DB_USER: ${MYSQL_USER}
+                  DB_PASSWORD: ${MYSQL_PASSWORD}
+                ports:
+                  - "8012:5000"
+                depends_on:
+                  - db
+                networks:
+                  - clienthub-network
+
+            volumes:
+              clienthub-mysql-data:
+
+            networks:
+              clienthub-network:
+                driver: bridge
+            EOF
+
+            echo "Récupération de la nouvelle image Docker..."
+            docker compose pull api
+
+            echo "Redémarrage de l'application..."
+            docker compose up -d --force-recreate --remove-orphans
+
+            echo "Attente du démarrage de l'API et de MySQL..."
+
+            for i in $(seq 1 30); do
+              if curl -fsS http://localhost:8012/clients; then
+                echo ""
+                echo "API et base de données opérationnelles !"
+                exit 0
+              fi
+
+              echo "Tentative $i/30..."
+              sleep 2
+            done
+
+            echo "L'application n'est pas disponible."
+            docker compose ps
+            docker compose logs
+            exit 1
