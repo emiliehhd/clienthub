@@ -25,3 +25,44 @@ jobs:
 
       - name: Run unit tests
         run: pytest tests/test_app.py
+
+
+  e2e-tests:
+    name: E2E tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start application
+        run: docker compose up -d
+
+      - name: Wait for API
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:8012/health; then
+              echo "API is ready"
+              exit 0
+            fi
+            echo "Waiting for API..."
+            sleep 2
+          done
+          echo "API did not start"
+          docker compose logs
+          exit 1
+
+      - name: Run E2E tests
+        run: pytest tests/test_e2e.py
+
+      - name: Stop application
+        if: always()
+        run: docker compose down
