@@ -204,6 +204,12 @@ jobs:
                 driver: bridge
             EOF
 
+            echo "Arrêt des anciens conteneurs..."
+            docker compose down --remove-orphans || true
+
+            echo "Suppression des anciens conteneurs portant les noms utilisés..."
+            docker rm -f clienthub-db clienthub-api 2>/dev/null || true
+
             echo "Récupération de la nouvelle image Docker..."
             docker compose pull api
 
