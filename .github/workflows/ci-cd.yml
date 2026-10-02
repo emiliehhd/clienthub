@@ -44,6 +44,11 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Start application
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: clienthub
+          MYSQL_USER: clienthub_user
+          MYSQL_PASSWORD: clienthubpassword
         run: docker compose up -d
 
       - name: Wait for API
