@@ -43,25 +43,29 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Create CI environment file
+        run: |
+          echo "MYSQL_ROOT_PASSWORD=rootpassword" > .env
+          echo "MYSQL_DATABASE=clienthub" >> .env
+          echo "MYSQL_USER=clienthub_user" >> .env
+          echo "MYSQL_PASSWORD=clienthubpassword" >> .env
+
       - name: Start application
-        env:
-          MYSQL_ROOT_PASSWORD: rootpassword
-          MYSQL_DATABASE: clienthub
-          MYSQL_USER: clienthub_user
-          MYSQL_PASSWORD: clienthubpassword
         run: docker compose up -d
 
-      - name: Wait for API
+      - name: Wait for API and database
         run: |
           for i in {1..30}; do
-            if curl -f http://localhost:8012/health; then
-              echo "API is ready"
+            if curl -f http://localhost:8012/clients; then
+              echo "API and database are ready"
               exit 0
             fi
-            echo "Waiting for API..."
+
+            echo "Waiting for API and database..."
             sleep 2
           done
-          echo "API did not start"
+
+          echo "API or database did not become ready"
           docker compose logs
           exit 1
 
